@@ -1,0 +1,153 @@
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  updateProfile as updateFirebaseProfile,
+} from 'firebase/auth';
+import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
+import { auth, db } from '@/config/firebase';
+
+export type UserRole = 'student' | 'teacher' | 'admin';
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+  grade?: string;
+  school?: string;
+  subject?: string;
+  joinedAt: string;
+}
+
+interface AuthContextType {
+  user: User | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  register: (data: RegisterData) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
+  updateUser: (updates: Partial<User>) => Promise<void>;
+}
+
+export interface RegisterData {
+  name: string;
+  email: string;
+  password: string;
+  role: UserRole;
+  grade?: string;
+  school?: string;
+  subject?: string;
+}
+
+const AuthContext = createContext<AuthContextType | null>(null);
+
+// Firestore collection where each user's profile (role, grade, school, etc.)
+// is stored, keyed by their Firebase Auth uid.
+const USERS_COLLECTION = 'users';
+
+function friendlyAuthError(code: string): string {
+  switch (code) {
+    case 'auth/invalid-email':
+      return 'Please enter a valid email address.';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'Invalid email or password.';
+    case 'auth/email-already-in-use':
+      return 'Email already registered.';
+    case 'auth/weak-password':
+      return 'Password should be at least 6 characters.';
+    case 'auth/network-request-failed':
+      return 'Network error. Please check your connection.';
+    default:
+      return 'Something went wrong. Please try again.';
+  }
+}
+
+export function AuthProvider({ children }: { children: ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Fires whenever the Firebase auth session changes (login, logout,
+    // app relaunch with a persisted session, etc.)
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          const snap = await getDoc(doc(db, USERS_COLLECTION, firebaseUser.uid));
+          if (snap.exists()) {
+            setUser(snap.data() as User);
+          } else {
+            setUser(null);
+          }
+        } catch {
+          setUser(null);
+        }
+      } else {
+        setUser(null);
+      }
+      setLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  const login = async (email: string, password: string) => {
+    try {
+      await signInWithEmailAndPassword(auth, email.trim(), password);
+      // onAuthStateChanged above will populate `user` from Firestore
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: friendlyAuthError(err?.code ?? '') };
+    }
+  };
+
+  const register = async (data: RegisterData) => {
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, data.email.trim(), data.password);
+      await updateFirebaseProfile(cred.user, { displayName: data.name });
+
+      const newUser: User = {
+        id: cred.user.uid,
+        name: data.name,
+        email: data.email.trim(),
+        role: data.role,
+        grade: data.grade,
+        school: data.school,
+        subject: data.subject,
+        joinedAt: new Date().toISOString().split('T')[0],
+      };
+
+      await setDoc(doc(db, USERS_COLLECTION, cred.user.uid), newUser);
+      setUser(newUser);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: friendlyAuthError(err?.code ?? '') };
+    }
+  };
+
+  const logout = async () => {
+    await signOut(auth);
+    setUser(null);
+  };
+
+  const updateUser = async (updates: Partial<User>) => {
+    if (!user) return;
+    const updated = { ...user, ...updates };
+    await updateDoc(doc(db, USERS_COLLECTION, user.id), updates as any);
+    setUser(updated);
+  };
+
+  return (
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser }}>
+      {children}
+    </AuthContext.Provider>
+  );
+}
+
+export function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
+  }
