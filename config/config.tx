@@ -1,0 +1,34 @@
+import { initializeApp, getApps, getApp } from 'firebase/app';
+import { initializeAuth, getReactNativePersistence, getAuth } from 'firebase/auth';
+import { getFirestore } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+
+// ─────────────────────────────────────────────────────────────
+// 👇 PUT YOUR FIREBASE CONFIG HERE 👇
+// Firebase Console → Project Settings → General → "Your apps" →
+// Web app (</>) → SDK setup and configuration → Config
+// ─────────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: 'AIzaSyAPOb6MB6EhKOO1HzxYndE4bYgnmAYJffY',
+  authDomain: 'my-ecz-app.firebaseapp.com',
+  projectId: 'my-ecz-app',
+  storageBucket: 'my-ecz-app.firebasestorage.app',
+  messagingSenderId: '37868373162',
+  appId: '1:37868373162:web:1e90847733ec1be3cf3cd3',
+  measurementId: 'G-7VXQ2BLQNK',
+};
+// ─────────────────────────────────────────────────────────────
+
+const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+
+// Auth: on native (iOS/Android) we persist sessions to AsyncStorage so users
+// stay logged in between app launches. On web, use the default persistence.
+export const auth = Platform.OS === 'web'
+  ? getAuth(app)
+  : initializeAuth(app, {
+      persistence: getReactNativePersistence(AsyncStorage),
+    });
+
+export const db = getFirestore(app);
+export default app;
